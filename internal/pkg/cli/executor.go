@@ -369,6 +369,7 @@ func (o *ExecutorSchema) Validate(dest []string) error { //nolint:cyclop // pre-
 		"dry-run",
 		"graph-preparation",
 		"helm",
+		"hold-additional-images",
 		"hold-operator",
 		"hold-release",
 		"delete",
@@ -846,6 +847,14 @@ func (o *ExecutorSchema) setupWorkingDir() error {
 	err = o.MakeDir.makeDirAll(path.Join(o.Opts.Global.WorkingDir, releaseImageExtractDir, cincinnatiGraphDataDir), 0o755)
 	if err != nil {
 		o.Log.Error(" setupWorkingDir for cincinnati graph data directory %v ", err)
+		return err
+	}
+
+	// create additional images cache dir
+	o.Log.Trace("creating additional images cache directory %s ", path.Join(o.Opts.Global.WorkingDir, additionalImagesExtractDir))
+	err = o.MakeDir.makeDirAll(path.Join(o.Opts.Global.WorkingDir, additionalImagesExtractDir), 0o755)
+	if err != nil {
+		o.Log.Error(" setupWorkingDir for additional images cache directory %v ", err)
 		return err
 	}
 

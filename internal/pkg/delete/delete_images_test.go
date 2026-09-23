@@ -566,6 +566,10 @@ func (o mockManifest) GetManifestListDigests(ctx context.Context, sourceCtx *typ
 	return nil, nil
 }
 
+func (o mockManifest) GetRepositoryTags(ctx context.Context, sourceCtx *types.SystemContext, imgRef string) ([]string, error) {
+	return nil, nil
+}
+
 func (o mockManifest) GetOCIImageFromIndex(dir string) (gcrv1.Image, error) { //nolint:ireturn // as expected by go-containerregistry
 	return nil, nil
 }

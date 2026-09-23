@@ -205,6 +205,15 @@ mirror:
       targetTag: custom-tag
 ```
 
+Image tags can also be selected via regular expressions instead of linked to a single tag or digest:
+
+```yaml
+mirror:
+  additionalImages:
+    - name: quay.io/example/my-image
+      tagsByRegex: '^v1\.\d+$'
+```
+
 ## Helm chart filtering
 
 ### Remote repositories

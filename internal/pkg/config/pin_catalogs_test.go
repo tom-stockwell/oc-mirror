@@ -68,6 +68,10 @@ func (m *MockManifest) GetManifestListDigests(ctx context.Context, sourceCtx *ty
 	return nil, nil
 }
 
+func (m *MockManifest) GetRepositoryTags(ctx context.Context, sourceCtx *types.SystemContext, imgRef string) ([]string, error) {
+	return nil, nil
+}
+
 const (
 	// Valid SHA256 digests for testing (64 hex characters)
 	testDigest1 = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
