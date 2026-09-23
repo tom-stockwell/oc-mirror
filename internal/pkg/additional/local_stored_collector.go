@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/openshift/oc-mirror/v2/internal/pkg/api/v2alpha1"
 	"github.com/openshift/oc-mirror/v2/internal/pkg/consts"
@@ -13,6 +15,13 @@ import (
 	"github.com/openshift/oc-mirror/v2/internal/pkg/manifest"
 	"github.com/openshift/oc-mirror/v2/internal/pkg/mirror"
 )
+
+// sigTagPattern matches the cosign/sigstore signature-tag convention
+// (sha256-<digest>.sig) so it can always be excluded from tag-regex matches:
+// oc-mirror already mirrors an image's signature automatically alongside the
+// image itself, so matching it directly as a standalone image is redundant
+// and would likely fail since it isn't a regular image manifest.
+var sigTagPattern = regexp.MustCompile(`^sha256-[0-9a-fA-F]{64}\.sig$`)
 
 type LocalStorageCollector struct {
 	Log                clog.PluggableLoggerInterface
@@ -52,8 +61,11 @@ func (o LocalStorageCollector) AdditionalImagesCollector(ctx context.Context) (v
 	var allErrs []error
 	platformFilters := make(map[string][]v2alpha1.InstancePlatformFilter)
 
+	expanded, expandErrs := o.expandTagsByRegexImages(ctx, o.Config.ImageSetConfigurationSpec.Mirror.AdditionalImages)
+	allErrs = append(allErrs, expandErrs...)
+
 	o.Log.Debug(collectorPrefix+"setting copy option o.Opts.MultiArch=%s when collecting releases image", o.Opts.MultiArch)
-	for _, img := range o.Config.ImageSetConfigurationSpec.Mirror.AdditionalImages {
+	for _, img := range expanded {
 		src, dest, origin, err := o.resolveAdditionalImageSrcDest(img)
 		if err != nil {
 			allErrs = append(allErrs, err)
@@ -205,4 +217,130 @@ func resolveTargetRepoTag(img v2alpha1.AdditionalImage, imgSpec image.ImageSpec)
 		targetTag = img.TargetTag
 	}
 	return targetRepo, targetTag
+}
+
+// expandTagsByRegexImages replaces every AdditionalImage entry that has
+// TagsByRegex set with one concrete AdditionalImage per tag in its
+// repository that matches the regex (skipping cosign signature tags),
+// leaving entries without TagsByRegex untouched. Expanded entries are then
+// resolved by the existing, unmodified per-tag resolution logic.
+//
+// Entries with TagsByRegex set require a registry (or on-disk cache) round
+// trip per repo via tagsForRepo; since those are independent of each other,
+// they are resolved concurrently, bounded by CopyOptions.ParallelImages (the
+// same knob that bounds concurrent image copies elsewhere), to avoid the
+// fixed per-call registry handshake overhead compounding linearly across
+// many entries. Each input entry writes only to its own result slot, so no
+// mutex is needed and output order matches input order.
+func (o LocalStorageCollector) expandTagsByRegexImages(ctx context.Context, in []v2alpha1.AdditionalImage) ([]v2alpha1.AdditionalImage, []error) {
+	results := make([][]v2alpha1.AdditionalImage, len(in))
+	errsByIdx := make([]error, len(in))
+
+	// ParallelImages is normally defaulted/validated to a value >= 1 by the
+	// CLI flag handling; guard against an unset (zero) value here only to
+	// avoid blocking forever on an empty semaphore, not to pick a parallelism
+	// of our own.
+	parallelism := o.Opts.ParallelImages
+	if parallelism == 0 {
+		parallelism = 1
+	}
+	semaphore := make(chan struct{}, parallelism)
+
+	var wg sync.WaitGroup
+	for i, img := range in {
+		if img.TagsByRegex == "" {
+			results[i] = []v2alpha1.AdditionalImage{img}
+			continue
+		}
+
+		semaphore <- struct{}{}
+		wg.Add(1)
+		go func(idx int, img v2alpha1.AdditionalImage) {
+			defer wg.Done()
+			defer func() { <-semaphore }()
+			results[idx], errsByIdx[idx] = o.expandTagsByRegexImage(ctx, img)
+		}(i, img)
+	}
+	wg.Wait()
+
+	var out []v2alpha1.AdditionalImage
+	var errs []error
+	for i := range in {
+		out = append(out, results[i]...)
+		if errsByIdx[i] != nil {
+			errs = append(errs, errsByIdx[i])
+		}
+	}
+
+	return out, errs
+}
+
+// expandTagsByRegexImage resolves a single AdditionalImage entry that has
+// TagsByRegex set into one concrete AdditionalImage per matching tag.
+func (o LocalStorageCollector) expandTagsByRegexImage(ctx context.Context, img v2alpha1.AdditionalImage) ([]v2alpha1.AdditionalImage, error) {
+	imgSpec, err := image.ParseBareRepo(img.Name)
+	if err != nil {
+		return nil, fmt.Errorf("additional image %q: %w", img.Name, err)
+	}
+	repo := imgSpec.Name
+
+	re, err := regexp.Compile(img.TagsByRegex)
+	if err != nil {
+		return nil, fmt.Errorf("additional image %q: invalid tagsByRegex %q: %w", img.Name, img.TagsByRegex, err)
+	}
+
+	tags, err := o.tagsForRepo(ctx, repo)
+	if err != nil {
+		return nil, fmt.Errorf("additional image %q: %w", img.Name, err)
+	}
+
+	var out []v2alpha1.AdditionalImage
+	for _, tag := range tags {
+		if sigTagPattern.MatchString(tag) {
+			continue
+		}
+		if !re.MatchString(tag) {
+			continue
+		}
+		out = append(out, v2alpha1.AdditionalImage{
+			Name:       repo + ":" + tag,
+			TargetRepo: img.TargetRepo,
+			Platforms:  img.Platforms,
+		})
+	}
+	if len(out) == 0 {
+		o.Log.Warn(collectorPrefix+"no tags in %q matched tagsByRegex %q", repo, img.TagsByRegex)
+	}
+
+	return out, nil
+}
+
+// tagsForRepo returns the list of tags for repo, mode-gated the same way the
+// Cincinnati graph-data cache is: mirrorToDisk/mirrorToMirror query the
+// registry live (mirrorToDisk additionally caches the result to
+// working-dir/ so diskToMirror can replay it), while diskToMirror/delete
+// read that cache only - they must not re-query the registry, since it may
+// be unreachable in a disconnected environment and tags may have drifted
+// since mirrorToDisk.
+func (o LocalStorageCollector) tagsForRepo(ctx context.Context, repo string) ([]string, error) {
+	if o.Opts.IsDiskToMirror() || o.Opts.IsDelete() {
+		return loadTagListCache(o.Opts.Global.WorkingDir, repo)
+	}
+
+	sysCtx, err := o.Opts.SrcImage.NewSystemContext()
+	if err != nil {
+		return nil, fmt.Errorf("get system context for %q: %w", repo, err)
+	}
+	tags, err := o.Manifest.GetRepositoryTags(ctx, sysCtx, repo)
+	if err != nil {
+		return nil, fmt.Errorf("list tags for %q: %w", repo, err)
+	}
+
+	if o.Opts.IsMirrorToDisk() {
+		if err := writeTagListCache(o.Opts.Global.WorkingDir, repo, tags); err != nil {
+			return nil, err
+		}
+	}
+
+	return tags, nil
 }

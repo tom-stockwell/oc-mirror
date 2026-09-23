@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	digest "github.com/opencontainers/go-digest"
+	"go.podman.io/image/v5/docker"
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/transports/alltransports"
 	"go.podman.io/image/v5/types"
@@ -55,6 +56,21 @@ func (o Manifest) GetManifestListDigests(ctx context.Context, sourceCtx *types.S
 		digests = append(digests, instance.String())
 	}
 	return digests, nil
+}
+
+// GetRepositoryTags lists every tag in the repository named by imgRef (any
+// tag or digest in imgRef is ignored - the whole repository's tags are listed).
+func (o Manifest) GetRepositoryTags(ctx context.Context, sourceCtx *types.SystemContext, imgRef string) ([]string, error) {
+	ref, err := docker.ParseReference("//" + imgRef)
+	if err != nil {
+		return nil, fmt.Errorf("parse repository reference %q: %w", imgRef, err)
+	}
+
+	tags, err := docker.GetRepositoryTags(ctx, sourceCtx, ref)
+	if err != nil {
+		return nil, fmt.Errorf("get repository tags for %q: %w", imgRef, err)
+	}
+	return tags, nil
 }
 
 func (o Manifest) ImageDigest(ctx context.Context, sourceCtx *types.SystemContext, imgRef string) (string, error) {

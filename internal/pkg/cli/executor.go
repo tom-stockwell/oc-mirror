@@ -849,6 +849,14 @@ func (o *ExecutorSchema) setupWorkingDir() error {
 		return err
 	}
 
+	// create additional images tag-regex cache dir
+	o.Log.Trace("creating additional images tag-regex cache directory %s ", path.Join(o.Opts.Global.WorkingDir, additionalImagesExtractDir, tagListCacheDir))
+	err = o.MakeDir.makeDirAll(path.Join(o.Opts.Global.WorkingDir, additionalImagesExtractDir, tagListCacheDir), 0o755)
+	if err != nil {
+		o.Log.Error(" setupWorkingDir for additional images tag-regex cache directory %v ", err)
+		return err
+	}
+
 	o.Log.Trace("creating operator cache directory %s ", filepath.Join(o.Opts.Global.WorkingDir, operatorCatalogsDir))
 	err = o.MakeDir.makeDirAll(filepath.Join(o.Opts.Global.WorkingDir, operatorCatalogsDir), 0o755)
 	if err != nil {

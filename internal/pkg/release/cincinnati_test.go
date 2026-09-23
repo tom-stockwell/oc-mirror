@@ -260,3 +260,7 @@ func (o mockManifest) ImageManifest(ctx context.Context, sourceCtx *types.System
 func (o mockManifest) GetManifestListDigests(ctx context.Context, sourceCtx *types.SystemContext, source string) ([]string, error) {
 	return nil, nil
 }
+
+func (o mockManifest) GetRepositoryTags(ctx context.Context, sourceCtx *types.SystemContext, imgRef string) ([]string, error) {
+	return nil, nil
+}

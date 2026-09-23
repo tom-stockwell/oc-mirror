@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/openshift/oc-mirror/v2/internal/pkg/api/v2alpha1"
+	"github.com/openshift/oc-mirror/v2/internal/pkg/image"
 )
 
 type (
@@ -17,8 +18,8 @@ type (
 )
 
 var (
-	validationChecks       = []validationFunc{validateOperatorOptions, validateReleaseChannels, validateBlockedImages, validateReleasePlatformFields}
-	validationDeleteChecks = []validationDeleteFunc{validateOperatorOptionsDelete, validateReleaseChannelsDelete}
+	validationChecks       = []validationFunc{validateOperatorOptions, validateReleaseChannels, validateBlockedImages, validateReleasePlatformFields, validateAdditionalImages}
+	validationDeleteChecks = []validationDeleteFunc{validateOperatorOptionsDelete, validateReleaseChannelsDelete, validateAdditionalImagesDelete}
 )
 
 // Validate will check an ImagesetConfiguration for input errors.
@@ -183,6 +184,39 @@ func validateBlockedImages(cfg *v2alpha1.ImageSetConfiguration) []error {
 	return nil
 }
 
+func validateAdditionalImages(cfg *v2alpha1.ImageSetConfiguration) []error {
+	errs := validateAdditionalImagesList(cfg.Mirror.AdditionalImages)
+	if len(errs) > 0 {
+		return errs
+	}
+	return nil
+}
+
+func validateAdditionalImagesList(images []v2alpha1.AdditionalImage) []error {
+	var errs []error
+	for _, img := range images {
+		if img.TagsByRegex == "" {
+			continue
+		}
+		if _, err := regexp.Compile(img.TagsByRegex); err != nil {
+			errs = append(errs, fmt.Errorf(
+				"additional image %q: invalid tagsByRegex %q: %w", img.Name, img.TagsByRegex, err,
+			))
+		}
+		if img.TargetTag != "" {
+			errs = append(errs, fmt.Errorf(
+				"additional image %q: targetTag is not allowed when tagsByRegex is set", img.Name,
+			))
+		}
+		if _, err := image.ParseBareRepo(img.Name); err != nil {
+			errs = append(errs, fmt.Errorf(
+				"additional image %q: name must be a bare repository (no tag or digest) when tagsByRegex is set: %w", img.Name, err,
+			))
+		}
+	}
+	return errs
+}
+
 // ValidateDelete will check an DeleteImagesetConfiguration for input errors.
 func ValidateDelete(cfg *v2alpha1.DeleteImageSetConfiguration) error {
 	var errs []error
@@ -220,6 +254,13 @@ func validateReleaseChannelsDelete(cfg *v2alpha1.DeleteImageSetConfiguration) er
 			)
 		}
 		channels.Insert(channel.Name)
+	}
+	return nil
+}
+
+func validateAdditionalImagesDelete(cfg *v2alpha1.DeleteImageSetConfiguration) error {
+	if errs := validateAdditionalImagesList(cfg.Delete.AdditionalImages); len(errs) > 0 {
+		return utilerrors.NewAggregate(errs)
 	}
 	return nil
 }

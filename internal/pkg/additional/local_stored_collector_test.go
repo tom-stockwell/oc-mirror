@@ -3,6 +3,9 @@ package additional
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	gcrv1 "github.com/google/go-containerregistry/pkg/v1"
@@ -26,6 +29,14 @@ type (
 	MockMirror   struct{}
 	MockManifest struct {
 		Log clog.PluggableLoggerInterface
+		// RepoTags, when non-nil, maps a repository reference to the tag
+		// list GetRepositoryTags should return for it. Used by tests that
+		// exercise TagsByRegex expansion.
+		RepoTags map[string][]string
+		// RepoTagsCalls counts GetRepositoryTags invocations, so tests can
+		// assert it is never called (e.g. in diskToMirror/delete mode).
+		// Atomic since TagsByRegex entries may be resolved concurrently.
+		RepoTagsCalls *atomic.Int64
 	}
 )
 
@@ -591,6 +602,329 @@ func TestAdditionalImageCollectorWithTargetRepoAndTag(t *testing.T) {
 	}
 }
 
+func TestAdditionalImageCollector_TagsByRegex(t *testing.T) {
+	log := clog.New("trace")
+	global := &mirror.GlobalOptions{SecurePolicy: false}
+	_, sharedOpts := mirror.SharedImageFlags()
+	_, deprecatedTLSVerifyOpt := mirror.DeprecatedTLSVerifyFlags()
+	_, srcOpts := mirror.ImageSrcFlags(global, sharedOpts, deprecatedTLSVerifyOpt, "src-", "screds")
+	_, destOpts := mirror.ImageDestFlags(global, sharedOpts, deprecatedTLSVerifyOpt, "dest-", "dcreds")
+	_, retryOpts := mirror.RetryFlags()
+	localstorageFQDN := "test.registry.com"
+	ctx := context.Background()
+
+	newOpts := func(workingDir, mode, destination string) mirror.CopyOptions {
+		global := &mirror.GlobalOptions{SecurePolicy: false, WorkingDir: workingDir}
+		return mirror.CopyOptions{
+			Global:              global,
+			DeprecatedTLSVerify: deprecatedTLSVerifyOpt,
+			SrcImage:            srcOpts,
+			DestImage:           destOpts,
+			RetryOpts:           retryOpts,
+			Destination:         destination,
+			Mode:                mode,
+			LocalStorageFQDN:    localstorageFQDN,
+		}
+	}
+
+	t.Run("mirrorToDisk expands matching tags and writes cache", func(t *testing.T) {
+		workingDir := t.TempDir()
+		opts := newOpts(workingDir, mirror.MirrorToDisk, consts.OciProtocol+"test")
+		var calls atomic.Int64
+		manifest := MockManifest{
+			Log:           log,
+			RepoTags:      map[string][]string{"registry.example.com/team/tool": {"v1.0", "v1.1", "v2.0", "sha256-" + fmt.Sprintf("%064d", 0) + ".sig"}},
+			RepoTagsCalls: &calls,
+		}
+		cfg := v2alpha1.ImageSetConfiguration{
+			ImageSetConfigurationSpec: v2alpha1.ImageSetConfigurationSpec{
+				Mirror: v2alpha1.Mirror{
+					AdditionalImages: []v2alpha1.AdditionalImage{
+						{Name: "registry.example.com/team/tool", TagsByRegex: "^v1\\..*$"},
+					},
+				},
+			},
+		}
+		ex := New(log, cfg, opts, MockMirror{}, manifest)
+		res, err := ex.AdditionalImagesCollector(ctx)
+		require.NoError(t, err)
+		expected := []v2alpha1.CopyImageSchema{
+			{
+				Source:      consts.DockerProtocol + "registry.example.com/team/tool:v1.0",
+				Origin:      "registry.example.com/team/tool:v1.0",
+				Destination: consts.DockerProtocol + "test.registry.com/team/tool:v1.0",
+				Type:        v2alpha1.TypeGeneric,
+			},
+			{
+				Source:      consts.DockerProtocol + "registry.example.com/team/tool:v1.1",
+				Origin:      "registry.example.com/team/tool:v1.1",
+				Destination: consts.DockerProtocol + "test.registry.com/team/tool:v1.1",
+				Type:        v2alpha1.TypeGeneric,
+			},
+		}
+		assert.ElementsMatch(t, expected, res.AllImages)
+		assert.Equal(t, int64(1), calls.Load())
+
+		// cache file should have been written under working-dir
+		entries, err := os.ReadDir(filepath.Join(workingDir, additionalImagesExtractDir, tagListCacheDir))
+		require.NoError(t, err)
+		assert.Len(t, entries, 1)
+	})
+
+	t.Run("zero matches warns but does not error", func(t *testing.T) {
+		workingDir := t.TempDir()
+		opts := newOpts(workingDir, mirror.MirrorToDisk, consts.OciProtocol+"test")
+		manifest := MockManifest{
+			Log:      log,
+			RepoTags: map[string][]string{"registry.example.com/team/tool": {"v2.0"}},
+		}
+		cfg := v2alpha1.ImageSetConfiguration{
+			ImageSetConfigurationSpec: v2alpha1.ImageSetConfigurationSpec{
+				Mirror: v2alpha1.Mirror{
+					AdditionalImages: []v2alpha1.AdditionalImage{
+						{Name: "registry.example.com/team/tool", TagsByRegex: "^v1\\..*$"},
+					},
+				},
+			},
+		}
+		ex := New(log, cfg, opts, MockMirror{}, manifest)
+		res, err := ex.AdditionalImagesCollector(ctx)
+		require.NoError(t, err)
+		assert.Empty(t, res.AllImages)
+	})
+
+	t.Run("diskToMirror reuses the mirrorToDisk cache without calling GetRepositoryTags", func(t *testing.T) {
+		workingDir := t.TempDir()
+		m2dOpts := newOpts(workingDir, mirror.MirrorToDisk, consts.OciProtocol+"test")
+		var seedCalls atomic.Int64
+		seedManifest := MockManifest{
+			Log:           log,
+			RepoTags:      map[string][]string{"registry.example.com/team/tool": {"v1.0", "v1.1"}},
+			RepoTagsCalls: &seedCalls,
+		}
+		cfg := v2alpha1.ImageSetConfiguration{
+			ImageSetConfigurationSpec: v2alpha1.ImageSetConfigurationSpec{
+				Mirror: v2alpha1.Mirror{
+					AdditionalImages: []v2alpha1.AdditionalImage{
+						{Name: "registry.example.com/team/tool", TagsByRegex: "^v1\\..*$"},
+					},
+				},
+			},
+		}
+		seedEx := New(log, cfg, m2dOpts, MockMirror{}, seedManifest)
+		_, err := seedEx.AdditionalImagesCollector(ctx)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), seedCalls.Load())
+
+		d2mOpts := newOpts(workingDir, mirror.DiskToMirror, consts.DockerProtocol+"mirror.acme.com")
+		var d2mCalls atomic.Int64
+		// no RepoTags configured: if GetRepositoryTags were called, the mock would error
+		d2mManifest := MockManifest{Log: log, RepoTagsCalls: &d2mCalls}
+		d2mEx := New(log, cfg, d2mOpts, MockMirror{}, d2mManifest)
+		res, err := d2mEx.AdditionalImagesCollector(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), d2mCalls.Load())
+		expected := []v2alpha1.CopyImageSchema{
+			{
+				Source:      consts.DockerProtocol + "test.registry.com/team/tool:v1.0",
+				Origin:      "registry.example.com/team/tool:v1.0",
+				Destination: consts.DockerProtocol + "mirror.acme.com/team/tool:v1.0",
+				Type:        v2alpha1.TypeGeneric,
+			},
+			{
+				Source:      consts.DockerProtocol + "test.registry.com/team/tool:v1.1",
+				Origin:      "registry.example.com/team/tool:v1.1",
+				Destination: consts.DockerProtocol + "mirror.acme.com/team/tool:v1.1",
+				Type:        v2alpha1.TypeGeneric,
+			},
+		}
+		assert.ElementsMatch(t, expected, res.AllImages)
+	})
+
+	t.Run("delete mode reuses the mirrorToDisk cache without calling GetRepositoryTags", func(t *testing.T) {
+		workingDir := t.TempDir()
+		m2dOpts := newOpts(workingDir, mirror.MirrorToDisk, consts.OciProtocol+"test")
+		seedManifest := MockManifest{
+			Log:      log,
+			RepoTags: map[string][]string{"registry.example.com/team/tool": {"v1.0"}},
+		}
+		cfg := v2alpha1.ImageSetConfiguration{
+			ImageSetConfigurationSpec: v2alpha1.ImageSetConfigurationSpec{
+				Mirror: v2alpha1.Mirror{
+					AdditionalImages: []v2alpha1.AdditionalImage{
+						{Name: "registry.example.com/team/tool", TagsByRegex: "^v1\\..*$"},
+					},
+				},
+			},
+		}
+		seedEx := New(log, cfg, m2dOpts, MockMirror{}, seedManifest)
+		_, err := seedEx.AdditionalImagesCollector(ctx)
+		require.NoError(t, err)
+
+		deleteOpts := newOpts(workingDir, mirror.DiskToMirror, consts.DockerProtocol+"mirror.acme.com")
+		deleteOpts.Function = string(mirror.DeleteMode)
+		var deleteCalls atomic.Int64
+		deleteManifest := MockManifest{Log: log, RepoTagsCalls: &deleteCalls}
+		deleteEx := New(log, cfg, deleteOpts, MockMirror{}, deleteManifest)
+		res, err := deleteEx.AdditionalImagesCollector(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), deleteCalls.Load())
+		require.Len(t, res.AllImages, 1)
+	})
+
+	t.Run("diskToMirror with no cache returns an error, not a network call", func(t *testing.T) {
+		workingDir := t.TempDir()
+		opts := newOpts(workingDir, mirror.DiskToMirror, consts.DockerProtocol+"mirror.acme.com")
+		manifest := MockManifest{Log: log}
+		cfg := v2alpha1.ImageSetConfiguration{
+			ImageSetConfigurationSpec: v2alpha1.ImageSetConfigurationSpec{
+				Mirror: v2alpha1.Mirror{
+					AdditionalImages: []v2alpha1.AdditionalImage{
+						{Name: "registry.example.com/team/tool", TagsByRegex: "^v1\\..*$"},
+					},
+				},
+			},
+		}
+		ex := New(log, cfg, opts, MockMirror{}, manifest)
+		_, err := ex.AdditionalImagesCollector(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no cached tag list found")
+	})
+
+	t.Run("TargetRepo applies across multiple matched tags", func(t *testing.T) {
+		workingDir := t.TempDir()
+		opts := newOpts(workingDir, mirror.MirrorToDisk, consts.OciProtocol+"test")
+		manifest := MockManifest{
+			Log:      log,
+			RepoTags: map[string][]string{"registry.example.com/team/tool": {"v1.0", "v1.1"}},
+		}
+		cfg := v2alpha1.ImageSetConfiguration{
+			ImageSetConfigurationSpec: v2alpha1.ImageSetConfigurationSpec{
+				Mirror: v2alpha1.Mirror{
+					AdditionalImages: []v2alpha1.AdditionalImage{
+						{Name: "registry.example.com/team/tool", TagsByRegex: "^v1\\..*$", TargetRepo: "custom/tool"},
+					},
+				},
+			},
+		}
+		ex := New(log, cfg, opts, MockMirror{}, manifest)
+		res, err := ex.AdditionalImagesCollector(ctx)
+		require.NoError(t, err)
+		expected := []v2alpha1.CopyImageSchema{
+			{
+				Source:      consts.DockerProtocol + "registry.example.com/team/tool:v1.0",
+				Origin:      "registry.example.com/team/tool:v1.0",
+				Destination: consts.DockerProtocol + "test.registry.com/custom/tool:v1.0",
+				Type:        v2alpha1.TypeGeneric,
+			},
+			{
+				Source:      consts.DockerProtocol + "registry.example.com/team/tool:v1.1",
+				Origin:      "registry.example.com/team/tool:v1.1",
+				Destination: consts.DockerProtocol + "test.registry.com/custom/tool:v1.1",
+				Type:        v2alpha1.TypeGeneric,
+			},
+		}
+		assert.ElementsMatch(t, expected, res.AllImages)
+	})
+
+	t.Run("many TagsByRegex entries across distinct repos are expanded concurrently and in order", func(t *testing.T) {
+		workingDir := t.TempDir()
+		opts := newOpts(workingDir, mirror.MirrorToDisk, consts.OciProtocol+"test")
+
+		const numRepos = 8
+		repoTags := map[string][]string{}
+		var additionalImages []v2alpha1.AdditionalImage
+		var expectedOrigins []string
+		for i := range numRepos {
+			repo := fmt.Sprintf("registry.example.com/team/tool%d", i)
+			repoTags[repo] = []string{"v1.0", "v2.0"}
+			additionalImages = append(additionalImages, v2alpha1.AdditionalImage{Name: repo, TagsByRegex: "^v1\\..*$"})
+			expectedOrigins = append(expectedOrigins, repo+":v1.0")
+		}
+
+		var calls atomic.Int64
+		manifest := MockManifest{Log: log, RepoTags: repoTags, RepoTagsCalls: &calls}
+		cfg := v2alpha1.ImageSetConfiguration{
+			ImageSetConfigurationSpec: v2alpha1.ImageSetConfigurationSpec{
+				Mirror: v2alpha1.Mirror{AdditionalImages: additionalImages},
+			},
+		}
+		ex := New(log, cfg, opts, MockMirror{}, manifest)
+		res, err := ex.AdditionalImagesCollector(ctx)
+		require.NoError(t, err)
+		require.Len(t, res.AllImages, numRepos)
+		assert.Equal(t, int64(numRepos), calls.Load())
+
+		var gotOrigins []string
+		for _, img := range res.AllImages {
+			gotOrigins = append(gotOrigins, img.Origin)
+		}
+		assert.Equal(t, expectedOrigins, gotOrigins, "output order should match input order despite concurrent resolution")
+	})
+
+	t.Run("sig tags are always excluded even if the regex would match them", func(t *testing.T) {
+		workingDir := t.TempDir()
+		opts := newOpts(workingDir, mirror.MirrorToDisk, consts.OciProtocol+"test")
+		sigTag := "sha256-" + fmt.Sprintf("%064d", 1) + ".sig"
+		manifest := MockManifest{
+			Log:      log,
+			RepoTags: map[string][]string{"registry.example.com/team/tool": {"v1.0", sigTag}},
+		}
+		cfg := v2alpha1.ImageSetConfiguration{
+			ImageSetConfigurationSpec: v2alpha1.ImageSetConfigurationSpec{
+				Mirror: v2alpha1.Mirror{
+					// ".*" would otherwise match the .sig tag too
+					AdditionalImages: []v2alpha1.AdditionalImage{
+						{Name: "registry.example.com/team/tool", TagsByRegex: ".*"},
+					},
+				},
+			},
+		}
+		ex := New(log, cfg, opts, MockMirror{}, manifest)
+		res, err := ex.AdditionalImagesCollector(ctx)
+		require.NoError(t, err)
+		require.Len(t, res.AllImages, 1)
+		assert.Equal(t, "registry.example.com/team/tool:v1.0", res.AllImages[0].Origin)
+	})
+
+	t.Run("invalid regex is reported as an error", func(t *testing.T) {
+		workingDir := t.TempDir()
+		opts := newOpts(workingDir, mirror.MirrorToDisk, consts.OciProtocol+"test")
+		manifest := MockManifest{Log: log}
+		cfg := v2alpha1.ImageSetConfiguration{
+			ImageSetConfigurationSpec: v2alpha1.ImageSetConfigurationSpec{
+				Mirror: v2alpha1.Mirror{
+					AdditionalImages: []v2alpha1.AdditionalImage{
+						{Name: "registry.example.com/team/tool", TagsByRegex: "("},
+					},
+				},
+			},
+		}
+		ex := New(log, cfg, opts, MockMirror{}, manifest)
+		_, err := ex.AdditionalImagesCollector(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid tagsByRegex")
+	})
+
+	t.Run("tag or digest present in Name alongside TagsByRegex is an error", func(t *testing.T) {
+		workingDir := t.TempDir()
+		opts := newOpts(workingDir, mirror.MirrorToDisk, consts.OciProtocol+"test")
+		manifest := MockManifest{Log: log}
+		cfg := v2alpha1.ImageSetConfiguration{
+			ImageSetConfigurationSpec: v2alpha1.ImageSetConfigurationSpec{
+				Mirror: v2alpha1.Mirror{
+					AdditionalImages: []v2alpha1.AdditionalImage{
+						{Name: "registry.example.com/team/tool:latest", TagsByRegex: ".*"},
+					},
+				},
+			},
+		}
+		ex := New(log, cfg, opts, MockMirror{}, manifest)
+		_, err := ex.AdditionalImagesCollector(ctx)
+		require.Error(t, err)
+	})
+}
+
 func (o MockMirror) Run(ctx context.Context, src, dest string, mode mirror.Mode, opts *mirror.CopyOptions) error {
 	return nil
 }
@@ -674,4 +1008,15 @@ func (o MockManifest) ImageManifest(ctx context.Context, sourceCtx *types.System
 
 func (o MockManifest) GetManifestListDigests(ctx context.Context, sourceCtx *types.SystemContext, source string) ([]string, error) {
 	return nil, nil
+}
+
+func (o MockManifest) GetRepositoryTags(ctx context.Context, sourceCtx *types.SystemContext, imgRef string) ([]string, error) {
+	if o.RepoTagsCalls != nil {
+		o.RepoTagsCalls.Add(1)
+	}
+	tags, ok := o.RepoTags[imgRef]
+	if !ok {
+		return nil, fmt.Errorf("mock: no tags configured for repo %q", imgRef)
+	}
+	return tags, nil
 }
