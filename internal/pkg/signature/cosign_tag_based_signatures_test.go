@@ -111,6 +111,10 @@ func (m *mockManifest) GetManifestListDigests(ctx context.Context, sourceCtx *ty
 	return nil, nil
 }
 
+func (m *mockManifest) GetRepositoryTags(ctx context.Context, sourceCtx *types.SystemContext, imgRef string) ([]string, error) {
+	return nil, nil
+}
+
 func TestSigstoreAttachmentTag(t *testing.T) {
 	tests := []struct {
 		name        string

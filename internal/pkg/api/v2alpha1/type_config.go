@@ -295,7 +295,13 @@ type Chart struct {
 type AdditionalImage struct {
 	// Name of the image. This should be an exact image pin (registry/namespace/name@sha256:<hash>)
 	// but is not required to be.
+	// When TagsByRegex is set, Name must instead be a bare repository reference
+	// (registry/namespace/name), with no tag or digest.
 	Name string `json:"name"`
+	// TagsByRegex is a regular expression matched against every tag in the repository
+	// named by Name, mirroring each matching tag as its own image. Cosign signature
+	// tags are always skipped. Requires a bare Name and an empty TargetTag.
+	TagsByRegex string `json:"tagsByRegex,omitempty"`
 	// TargetRepo replaces the repository path and allows for specifying the exact URL of the target
 	// image, including any path-components (organization, namespace) of the target image's location
 	// on the disconnected registry.
@@ -312,6 +318,7 @@ type AdditionalImage struct {
 	// TargetTag is the tag the image will be mirrored with. If unset,
 	// the image will be mirrored with the provided tag in the Name
 	// field or a tag calculated from the partial digest.
+	// Mutually exclusive with TagsByRegex.
 	TargetTag string `json:"targetTag,omitempty"`
 	// Platforms defines one or more OS/Architecture pairs to mirror
 	// for multi-architecture images. If empty, mirrors all platforms.

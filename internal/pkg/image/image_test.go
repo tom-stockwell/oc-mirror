@@ -257,6 +257,58 @@ func TestImage_TestParseRef(t *testing.T) {
 	}
 }
 
+func TestImage_ParseBareRepo(t *testing.T) {
+	type testCase struct {
+		caseName       string
+		repoRef        string
+		expectedDomain string
+		expectedPath   string
+		expectError    bool
+	}
+	testCases := []testCase{
+		{
+			caseName:       "domain and multi-component path",
+			repoRef:        "registry.example.com/team/tool",
+			expectedDomain: "registry.example.com",
+			expectedPath:   "team/tool",
+		},
+		{
+			caseName:       "single path component, no domain",
+			repoRef:        "tool",
+			expectedDomain: "",
+			expectedPath:   "tool",
+		},
+		{
+			caseName:    "rejects a tag",
+			repoRef:     "registry.example.com/team/tool:latest",
+			expectError: true,
+		},
+		{
+			caseName:    "rejects a digest",
+			repoRef:     "registry.example.com/team/tool@sha256:44d75007b39e0e1bbf1bcfd0721245add54c54c3f83903f8926fb4bef6827aa2",
+			expectError: true,
+		},
+		{
+			caseName:    "rejects an empty reference",
+			repoRef:     "",
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.caseName, func(t *testing.T) {
+			imgSpec, err := ParseBareRepo(tc.repoRef)
+			if tc.expectError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.expectedDomain, imgSpec.Domain)
+			require.Equal(t, tc.expectedPath, imgSpec.PathComponent)
+		})
+	}
+}
+
 func TestImage_TestWithMaxNestedPaths(t *testing.T) {
 	type testCase struct {
 		caseName       string

@@ -315,6 +315,7 @@ Two files are generated in the working directory:
 
 ### Additional Feature Documentation
 
+- [Filtering](docs/features/filtering.md) — controlling which content is mirrored, including selecting additional images by tag regex
 - [Enclave Support](docs/features/enclave_support.md) — multi-stage mirroring through intermediate disconnected networks
 - [Signature Verification](docs/features/signature-verification.md) — verifying image signatures during mirroring
 - [Delete Functionality](docs/features/delete-functionality.md) — removing mirrored images from a registry

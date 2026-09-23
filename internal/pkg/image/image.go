@@ -123,6 +123,24 @@ func ParseRef(imgRef string) (ImageSpec, error) {
 	return imgSpec, nil
 }
 
+// ParseBareRepo parses a docker-transport domain/path reference that carries
+// no tag and no digest (e.g. as used by AdditionalImage.TagsByRegex, where
+// the repository itself - not a single image - is being referenced).
+// It returns an error if a tag or digest is present.
+func ParseBareRepo(repoRef string) (ImageSpec, error) {
+	imgSpec, err := parseImageSpec(repoRef)
+	if err != nil {
+		return ImageSpec{}, err
+	}
+	if imgSpec.Digest != "" {
+		return ImageSpec{}, fmt.Errorf(errMessageImage+" : bare repository reference must not include a digest", repoRef)
+	}
+	if imgSpec.Tag != "" {
+		return ImageSpec{}, fmt.Errorf(errMessageImage+" : bare repository reference must not include a tag", repoRef)
+	}
+	return imgSpec, nil
+}
+
 func (i ImageSpec) IsImageByDigest() bool {
 	return i.Digest != ""
 }
