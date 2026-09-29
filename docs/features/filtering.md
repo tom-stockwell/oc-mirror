@@ -205,26 +205,14 @@ mirror:
       targetTag: custom-tag
 ```
 
-### Selecting images by tag regex
-
-Instead of pinning a single tag or digest, a repository's tags can be matched against a regular expression, mirroring every tag that matches. This is useful for repositories with many build/version tags that would otherwise need to be listed individually (similar to `skopeo sync`'s `images-by-tag-regex` source configuration).
+Image tags can also be selected via regular expressions instead of linked to a single tag or digest:
 
 ```yaml
 mirror:
   additionalImages:
     - name: quay.io/example/my-image
-      tagsByRegex: '^v1\.2\..*$'
+      tagsByRegex: '^v1\.\d+$'
 ```
-
-Rules when `tagsByRegex` is set:
-
-- `name` must be a **bare repository reference** — no `:tag` and no `@digest`. The tag comes from each matched tag instead.
-- `targetTag` cannot be combined with `tagsByRegex`: since one entry can expand to many images, there is no single tag to override to. Use `targetRepo` if you need to relocate the repository; each mirrored image keeps its own source tag as its destination tag.
-- `targetRepo` and `platforms` still apply, uniformly, to every image the regex matches.
-- Tags following the cosign signature convention (`sha256-<digest>.sig`) are always excluded from matching, since oc-mirror already mirrors an image's signature automatically as part of copying the image itself (unless `--remove-signatures` is passed).
-- The regex is matched with Go's `regexp` package (RE2 syntax) against the tag only, not the full image reference.
-- The tag list is resolved once, from the source registry, during `mirrorToDisk`/`mirrorToMirror`, and cached to the working directory. `diskToMirror` (and `delete`) replay that cached list rather than re-querying the registry, so the set of mirrored tags stays consistent between the two phases even if new tags are pushed to the source repository in between.
-- When multiple `additionalImages` entries use `tagsByRegex`, their tag lists are resolved concurrently, bounded by `--parallel-images`, instead of one repository at a time.
 
 ## Helm chart filtering
 
