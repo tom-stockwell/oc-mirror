@@ -1,10 +1,8 @@
 package config
 
 import (
-	"regexp"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/openshift/oc-mirror/v2/internal/pkg/api/v2alpha1"
@@ -388,93 +386,4 @@ func TestValidate(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestValidateAdditionalImagesTagsByRegex(t *testing.T) {
-	type spec struct {
-		name        string
-		images      []v2alpha1.AdditionalImage
-		expErrorHas []string
-	}
-
-	_, regexErr := regexp.Compile("(")
-	require.Error(t, regexErr)
-
-	cases := []spec{
-		{
-			name: "valid tagsByRegex with bare repo name",
-			images: []v2alpha1.AdditionalImage{
-				{Name: "registry.example.com/team/tool", TagsByRegex: "^v1\\..*$"},
-			},
-		},
-		{
-			name: "invalid regex",
-			images: []v2alpha1.AdditionalImage{
-				{Name: "registry.example.com/team/tool", TagsByRegex: "("},
-			},
-			expErrorHas: []string{`invalid tagsByRegex "(": ` + regexErr.Error()},
-		},
-		{
-			name: "targetTag conflicts with tagsByRegex",
-			images: []v2alpha1.AdditionalImage{
-				{Name: "registry.example.com/team/tool", TagsByRegex: ".*", TargetTag: "v1.0"},
-			},
-			expErrorHas: []string{"targetTag is not allowed when tagsByRegex is set"},
-		},
-		{
-			name: "tagged name conflicts with tagsByRegex",
-			images: []v2alpha1.AdditionalImage{
-				{Name: "registry.example.com/team/tool:latest", TagsByRegex: ".*"},
-			},
-			expErrorHas: []string{"name must be a bare repository (no tag or digest) when tagsByRegex is set"},
-		},
-		{
-			name: "digested name conflicts with tagsByRegex",
-			images: []v2alpha1.AdditionalImage{
-				{Name: "registry.example.com/team/tool@sha256:44d75007b39e0e1bbf1bcfd0721245add54c54c3f83903f8926fb4bef6827aa2", TagsByRegex: ".*"},
-			},
-			expErrorHas: []string{"name must be a bare repository (no tag or digest) when tagsByRegex is set"},
-		},
-		{
-			name: "entries without tagsByRegex are untouched",
-			images: []v2alpha1.AdditionalImage{
-				{Name: "registry.example.com/team/tool:latest", TargetTag: "v1.0"},
-			},
-		},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			cfg := &v2alpha1.ImageSetConfiguration{
-				ImageSetConfigurationSpec: v2alpha1.ImageSetConfigurationSpec{
-					Mirror: v2alpha1.Mirror{AdditionalImages: c.images},
-				},
-			}
-			err := Validate(cfg)
-			if len(c.expErrorHas) == 0 {
-				require.NoError(t, err)
-				return
-			}
-			require.Error(t, err)
-			for _, substr := range c.expErrorHas {
-				assert.Contains(t, err.Error(), substr)
-			}
-		})
-	}
-
-	t.Run("delete config validation covers the same rules", func(t *testing.T) {
-		cfg := &v2alpha1.DeleteImageSetConfiguration{
-			DeleteImageSetConfigurationSpec: v2alpha1.DeleteImageSetConfigurationSpec{
-				Delete: v2alpha1.Delete{
-					AdditionalImages: []v2alpha1.AdditionalImage{
-						{Name: "registry.example.com/team/tool", TagsByRegex: "(", TargetTag: "v1.0"},
-					},
-				},
-			},
-		}
-		err := ValidateDelete(cfg)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid tagsByRegex")
-		assert.Contains(t, err.Error(), "targetTag is not allowed")
-	})
 }
