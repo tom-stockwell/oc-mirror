@@ -300,7 +300,8 @@ type AdditionalImage struct {
 	Name string `json:"name"`
 	// TagsByRegex is a regular expression matched against every tag in the repository
 	// named by Name. Every matching tag is expanded into its own image to mirror.
-	// When set, Name must be a bare repository reference (no tag, no digest), and
+	// When set:
+	// Name must be a bare repository reference (no tag, no digest), and
 	// TargetTag must be empty (there is no single target tag for the expanded images).
 	// Tags matching the cosign signature-tag convention (sha256-<digest>.sig) are
 	// always skipped, since oc-mirror already mirrors an image's signature
@@ -318,7 +319,6 @@ type AdditionalImage struct {
 	//     path-component = alpha-numeric [separator alpha-numeric]*
 	//     alpha-numeric  = /[a-z0-9]+/
 	//     separator      = /[_.]|__|[-]*/
-	// When TagsByRegex is set, TargetRepo still applies uniformly to every expanded image.
 	TargetRepo string `json:"targetRepo,omitempty"`
 	// TargetTag is the tag the image will be mirrored with. If unset,
 	// the image will be mirrored with the provided tag in the Name
@@ -328,7 +328,6 @@ type AdditionalImage struct {
 	// Platforms defines one or more OS/Architecture pairs to mirror
 	// for multi-architecture images. If empty, mirrors all platforms.
 	// Example: [{OS: "linux", Architecture: "amd64"}, {OS: "linux", Architecture: "arm64"}]
-	// When TagsByRegex is set, Platforms applies uniformly to every expanded image.
 	Platforms []InstancePlatformFilter `json:"platforms,omitempty"`
 }
 
