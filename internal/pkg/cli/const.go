@@ -10,7 +10,6 @@ const (
 	releaseImageExtractDir     string = "hold-release"
 	cincinnatiGraphDataDir     string = "cincinnati-graph-data"
 	additionalImagesExtractDir string = "hold-additional-images"
-	tagListCacheDir            string = "tag-regex-cache"
 	operatorCatalogsDir        string = "operator-catalogs"
 	signaturesDir              string = "signatures"
 	startMessage               string = "starting local storage on localhost:%v"

@@ -665,10 +665,10 @@ func TestAdditionalImageCollector_TagsByRegex(t *testing.T) {
 		assert.ElementsMatch(t, expected, res.AllImages)
 		assert.Equal(t, int64(1), calls.Load())
 
-		// cache file should have been written under working-dir
-		entries, err := os.ReadDir(filepath.Join(workingDir, additionalImagesExtractDir, tagListCacheDir))
+		// cache file should have been written under working-dir, nested under
+		// a directory tree matching the repository name
+		_, err = os.Stat(filepath.Join(workingDir, additionalImagesExtractDir, "registry.example.com/team/tool", "tags.json"))
 		require.NoError(t, err)
-		assert.Len(t, entries, 1)
 	})
 
 	t.Run("zero matches warns but does not error", func(t *testing.T) {

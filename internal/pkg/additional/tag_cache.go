@@ -1,35 +1,24 @@
 package additional
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 )
 
-// tagListCacheEntry is the on-disk shape of a cached repository tag list.
-// Repo is stored alongside Tags purely for human-debuggability of the cache
-// file; it is not used to validate the lookup key.
-type tagListCacheEntry struct {
-	Repo string   `json:"repo"`
-	Tags []string `json:"tags"`
-}
-
-// tagCacheFilePath returns the cache file path for a given repository,
-// hashing the repo name to keep the filename filesystem-safe regardless of
-// what characters the repo reference contains.
+// tagCacheFilePath returns the cache file path for a given repository, laid
+// out under a directory tree that mirrors the repository name itself (e.g.
+// registry.example.com/team/tool/tags.json), so other kinds of per-image
+// cached data can later live alongside it under the same per-repo directory.
 func tagCacheFilePath(workingDir, repo string) string {
-	sum := sha256.Sum256([]byte(repo))
-	return filepath.Join(workingDir, additionalImagesExtractDir, tagListCacheDir, hex.EncodeToString(sum[:16])+".json")
+	return filepath.Join(workingDir, additionalImagesExtractDir, repo, "tags.json")
 }
 
 // writeTagListCache persists the resolved tag list for repo so a later
 // diskToMirror (or delete) run can replay it without a live registry call.
 func writeTagListCache(workingDir, repo string, tags []string) error {
-	entry := tagListCacheEntry{Repo: repo, Tags: tags}
-	data, err := json.Marshal(entry)
+	data, err := json.Marshal(tags)
 	if err != nil {
 		return fmt.Errorf("failed to marshal tag list cache for %q: %w", repo, err)
 	}
@@ -55,9 +44,9 @@ func loadTagListCache(workingDir, repo string) ([]string, error) {
 		}
 		return nil, fmt.Errorf("failed to read tag list cache for %q: %w", repo, err)
 	}
-	var entry tagListCacheEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
+	var tags []string
+	if err := json.Unmarshal(data, &tags); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal tag list cache for %q: %w", repo, err)
 	}
-	return entry.Tags, nil
+	return tags, nil
 }
