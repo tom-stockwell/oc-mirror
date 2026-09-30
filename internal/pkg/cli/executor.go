@@ -369,6 +369,7 @@ func (o *ExecutorSchema) Validate(dest []string) error { //nolint:cyclop // pre-
 		"dry-run",
 		"graph-preparation",
 		"helm",
+		"hold-additional-images",
 		"hold-operator",
 		"hold-release",
 		"delete",

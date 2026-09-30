@@ -2,6 +2,7 @@ package additional
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -665,10 +666,13 @@ func TestAdditionalImageCollector_TagsByRegex(t *testing.T) {
 		assert.ElementsMatch(t, expected, res.AllImages)
 		assert.Equal(t, int64(1), calls.Load())
 
-		// cache file should have been written under working-dir, nested under
-		// a directory tree matching the repository name
-		_, err = os.Stat(filepath.Join(workingDir, additionalImagesExtractDir, "registry.example.com/team/tool", "tags.json"))
+		// metadata file should have been written under working-dir, nested
+		// under a directory tree matching the repository name
+		data, err := os.ReadFile(filepath.Join(workingDir, additionalImagesExtractDir, "registry.example.com/team/tool", "_meta.json"))
 		require.NoError(t, err)
+		expectedMeta, err := json.Marshal(repoMetadata{Tags: manifest.RepoTags["registry.example.com/team/tool"]})
+		require.NoError(t, err)
+		assert.JSONEq(t, string(expectedMeta), string(data))
 	})
 
 	t.Run("zero matches warns but does not error", func(t *testing.T) {

@@ -553,6 +553,12 @@ func TestExecutorValidate(t *testing.T) {
 		err = ex.Validate([]string{consts.DockerProtocol + "test"})
 		assert.EqualError(t, err, "when --from is used, it must have file:// prefix")
 
+		// check file:// destination must not contain an internal working-dir keyword
+		opts.Global.ConfigPath = "test"
+		opts.Global.From = ""
+		err = ex.Validate([]string{consts.FileProtocol + "test/hold-additional-images"})
+		assert.EqualError(t, err, "the destination contains an internal oc-mirror keyword 'hold-additional-images'")
+
 		// check destination protocol
 		opts.Global.ConfigPath = "test"
 		opts.Global.From = ""

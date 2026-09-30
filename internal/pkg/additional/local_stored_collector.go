@@ -324,7 +324,11 @@ func (o LocalStorageCollector) expandTagsByRegexImage(ctx context.Context, img v
 // since mirrorToDisk.
 func (o LocalStorageCollector) tagsForRepo(ctx context.Context, repo string) ([]string, error) {
 	if o.Opts.IsDiskToMirror() || o.Opts.IsDelete() {
-		return loadTagListCache(o.Opts.Global.WorkingDir, repo)
+		meta, err := loadRepoMetadata(o.Opts.Global.WorkingDir, repo)
+		if err != nil {
+			return nil, err
+		}
+		return meta.Tags, nil
 	}
 
 	sysCtx, err := o.Opts.SrcImage.NewSystemContext()
@@ -337,7 +341,7 @@ func (o LocalStorageCollector) tagsForRepo(ctx context.Context, repo string) ([]
 	}
 
 	if o.Opts.IsMirrorToDisk() {
-		if err := writeTagListCache(o.Opts.Global.WorkingDir, repo, tags); err != nil {
+		if err := writeRepoMetadata(o.Opts.Global.WorkingDir, repo, repoMetadata{Tags: tags}); err != nil {
 			return nil, err
 		}
 	}
