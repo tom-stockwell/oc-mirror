@@ -299,13 +299,8 @@ type AdditionalImage struct {
 	// (registry/namespace/name), with no tag or digest.
 	Name string `json:"name"`
 	// TagsByRegex is a regular expression matched against every tag in the repository
-	// named by Name. Every matching tag is expanded into its own image to mirror.
-	// When set:
-	// Name must be a bare repository reference (no tag, no digest), and
-	// TargetTag must be empty (there is no single target tag for the expanded images).
-	// Tags matching the cosign signature-tag convention (sha256-<digest>.sig) are
-	// always skipped, since oc-mirror already mirrors an image's signature
-	// automatically alongside the image itself.
+	// named by Name, mirroring each matching tag as its own image. Cosign signature
+	// tags are always skipped. Requires a bare Name and an empty TargetTag.
 	TagsByRegex string `json:"tagsByRegex,omitempty"`
 	// TargetRepo replaces the repository path and allows for specifying the exact URL of the target
 	// image, including any path-components (organization, namespace) of the target image's location

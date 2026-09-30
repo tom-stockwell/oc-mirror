@@ -17,11 +17,9 @@ import (
 	"github.com/openshift/oc-mirror/v2/internal/testutils"
 )
 
-// TestEnvironmentAdditionalTagsByRegex exercises the additionalImages
-// tagsByRegex feature end-to-end: mirrorToDisk resolves and caches the
-// matching tags from a live (fake) source registry, and diskToMirror
-// replays that cached tag list - without any access to the source
-// registry - to push the matching images to the destination.
+// TestEnvironmentAdditionalTagsByRegex exercises additionalImages tagsByRegex
+// end-to-end: mirrorToDisk caches the matching tags from a fake source registry,
+// and diskToMirror replays that cache without touching the source.
 type TestEnvironmentAdditionalTagsByRegex struct {
 	sourceServer              *httptest.Server
 	destinationServer         *httptest.Server

@@ -7,16 +7,12 @@ import (
 	"path/filepath"
 )
 
-// repoMetadata is the on-disk shape of the cached per-repository metadata.
-// It is a JSON object (rather than e.g. a bare tag array) so new fields can
-// be added later without breaking caches written by older versions.
 type repoMetadata struct {
 	Tags []string `json:"tags"`
 }
 
-// repoMetadataFilePath returns the metadata file path for a given repository,
-// laid out under a directory tree that mirrors the repository name itself
-// (e.g. registry.example.com/team/tool/_meta.json).
+// repoMetadataFilePath returns the metadata file path for a repository, under a
+// directory tree mirroring the repository name (registry.example.com/team/tool/...).
 func repoMetadataFilePath(workingDir, repo string) string {
 	return filepath.Join(workingDir, additionalImagesExtractDir, repo, repoMetadataFileName)
 }
@@ -38,9 +34,8 @@ func writeRepoMetadata(workingDir, repo string, meta repoMetadata) error {
 	return nil
 }
 
-// loadRepoMetadata reads back metadata previously written by
-// writeRepoMetadata. It returns an error if no cache exists for repo -
-// callers should treat that as "run mirrorToDisk first".
+// loadRepoMetadata reads back metadata written by writeRepoMetadata, erroring if
+// none exists for repo - callers should treat that as "run mirrorToDisk first".
 func loadRepoMetadata(workingDir, repo string) (repoMetadata, error) {
 	path := repoMetadataFilePath(workingDir, repo)
 	data, err := os.ReadFile(path) //nolint:gosec // path is derived internally, not user input
