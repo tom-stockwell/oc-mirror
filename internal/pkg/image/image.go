@@ -133,10 +133,10 @@ func ParseBareRepo(repoRef string) (ImageSpec, error) {
 		return ImageSpec{}, err
 	}
 	if imgSpec.Digest != "" {
-		return ImageSpec{}, fmt.Errorf("%s: a bare repository reference must not include a digest", repoRef)
+		return ImageSpec{}, fmt.Errorf(errMessageImage+" : bare repository reference must not include a digest", repoRef)
 	}
 	if imgSpec.Tag != "" {
-		return ImageSpec{}, fmt.Errorf("%s: a bare repository reference must not include a tag", repoRef)
+		return ImageSpec{}, fmt.Errorf(errMessageImage+" : bare repository reference must not include a tag", repoRef)
 	}
 	return imgSpec, nil
 }

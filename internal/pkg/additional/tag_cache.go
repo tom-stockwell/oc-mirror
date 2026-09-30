@@ -31,14 +31,14 @@ func writeTagListCache(workingDir, repo string, tags []string) error {
 	entry := tagListCacheEntry{Repo: repo, Tags: tags}
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return fmt.Errorf("marshal tag list cache for %q: %w", repo, err)
+		return fmt.Errorf("failed to marshal tag list cache for %q: %w", repo, err)
 	}
 	path := tagCacheFilePath(workingDir, repo)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create tag list cache dir for %q: %w", repo, err)
+		return fmt.Errorf("failed to create tag list cache dir for %q: %w", repo, err)
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil { //nolint:gosec // no sensitive info
-		return fmt.Errorf("write tag list cache for %q: %w", repo, err)
+		return fmt.Errorf("failed to write tag list cache for %q: %w", repo, err)
 	}
 	return nil
 }
@@ -53,11 +53,11 @@ func loadTagListCache(workingDir, repo string) ([]string, error) {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("no cached tag list found for repository %q: run mirrorToDisk (or mirrorToMirror) first", repo)
 		}
-		return nil, fmt.Errorf("read tag list cache for %q: %w", repo, err)
+		return nil, fmt.Errorf("failed to read tag list cache for %q: %w", repo, err)
 	}
 	var entry tagListCacheEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
-		return nil, fmt.Errorf("parse tag list cache for %q: %w", repo, err)
+		return nil, fmt.Errorf("failed to unmarshal tag list cache for %q: %w", repo, err)
 	}
 	return entry.Tags, nil
 }
